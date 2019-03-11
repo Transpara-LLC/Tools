@@ -1,4 +1,4 @@
-            var pss = @"C:\Users\IGNITE\Desktop\csharp.ps1";//root to the ps
+            var pss = @"C:\Users\IGNITE\Desktop\csharp.ps1";//path to the ps script
             Process cmd = new Process();//create a CMD to run powershell, directly running powershell didn't seem to work
             cmd.StartInfo.FileName = "cmd.exe";
             cmd.StartInfo.RedirectStandardInput = true;

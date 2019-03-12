@@ -1,0 +1,1 @@
+PowerShell.Exe -File C:\Users\IGNITE\Desktop\RenameInterface.ps1 "Print param" "second print param"

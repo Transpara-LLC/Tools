@@ -269,7 +269,7 @@ function getServerAndDB {
 }
 function mapDatabaseRoleToLogin {
     #get variables
-    $instanceName = "localhost\SQLExpress"
+    $instanceName = "$global:SQLServer"
     $loginName = "NT AUTHORITY\NETWORK SERVICE"
     $dbUserName = "NT AUTHORITY\NETWORK SERVICE"
     $databasename = $global:newSQLDBName

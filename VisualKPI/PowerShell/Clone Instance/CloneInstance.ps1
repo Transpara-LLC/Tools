@@ -235,7 +235,7 @@ function replaceConnectionStrings {
 function editDatabaseInterfacesURL { 
     $SqlConnection = New-Object System.Data.SqlClient.SqlConnection
     $SqlConnection.ConnectionString = "Server = $global:SQLServer; Database = 
-    $global:newInstanceName; Integrated Security = True"
+    $global:newSQLDBName; Integrated Security = True"
     $SqlConnection.Open()
     $update = @"
      UPDATE $global:SQLTable

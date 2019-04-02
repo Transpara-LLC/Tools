@@ -1,4 +1,4 @@
-﻿#PREREQES: THE SQLPS Module comes from a SQL Server installation, if there is none you can try install-module sqlserver and then import-module sqlserver (You need to have powershell 5 for installing)
+﻿#PREREQES : THE SQLPS Module comes from a SQL Server installation, if there is none you can try install-module sqlserver and then import-module sqlserver (You need to have powershell 5 for installing)
 
 #Imports
 Import-Module WebAdministration

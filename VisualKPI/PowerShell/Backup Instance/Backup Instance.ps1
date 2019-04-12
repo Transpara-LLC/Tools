@@ -1,7 +1,4 @@
-﻿#TODO create services and Rcs
-#clone app pools
-#make web apps
-
+﻿#version 2
 
 #Enforce Running as an administrator
 function Use-RunAs {    

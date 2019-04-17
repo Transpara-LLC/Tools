@@ -1,6 +1,8 @@
-﻿#PREREQES: THE SQLPS Module comes from a SQL Server installation, if there is none you can try install-module sqlserver and then import-module sqlserver (You need to have powershell 5 for installing)
-#CONSTRAINTS: Only moves within the existing website
-#TODO redo pop up texts, move to another site
+﻿#Imports
+Import-Module WebAdministration
+Import-Module SQLPS -DisableNameChecking
+[system.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic')
+#end imports
 function Use-RunAs 
 {    
     # Check if script is running as Adminstrator and if not use RunAs 
@@ -38,53 +40,28 @@ function Use-RunAs
 } 
  
 Use-RunAs  
- 
-#Imports
-Import-Module WebAdministration
-Import-Module SQLPS -DisableNameChecking
-[system.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic')
-#end imports
-
-#global hardcodable variables
+#global variables
 $global:sourceAppPools = @()
 $global:sourceServices = @()
-
-$global:siteName="Default Web Site"
-$global:sourceInstanceName=""
+$global:siteName=""
+$global:instanceName=""
 $global:newInstanceName=""
+$global:pathToInstance=""
+$global:pathToOldInstance=""
+$global:newCacheServiceName=""
+$global:newAlertServiceName=""
+$global:SQLDBName=""
+$global:SQLServer=""
 $global:newSQLDBName=""
+$global:SQLTable = "dbo.tableInterfaces"
+$global:remoteContextPath = "" 
+$global:remoteContextExists = ""
+$networkServicePassword = (new-object System.Security.SecureString)
+$global:NetworkServiceCredentials = New-Object System.Management.Automation.PSCredential ("NT AUTHORITY\NETWORK SERVICE", $networkServicePassword)
 #end of global variables
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#----------------------dont edit variables below--------------
-
-
-$networkServicePassword = (new-object System.Security.SecureString)
-$global:NetworkServiceCredentials = New-Object System.Management.Automation.PSCredential ("NT AUTHORITY\NETWORK SERVICE", $networkServicePassword)
-$global:SQLTable = "dbo.tableInterfaces" #the table to edit the interfaces url
-$global:pathToInstance=""#the path to the source instance
-$global:sourceSQLDBName=""#will be obtained and set by looking on the file system webconfig
-$global:SQLServer=""#will be obtained and set by looking on the file system webconfig
-$global:remoteContextPath = ""#the path of the remote context services 
-$global:remoteContextExists = ""# a variable to check if there are remote context services
-
-
-#gets the startup type of a service
-function getServiceStartupType($serviceName) {
+function getStartupType($serviceName) {
     $startType = Get-WmiObject -Class Win32_Service -Property StartMode -Filter "Name='$serviceName'" | select -property * -ExcludeProperty PSComputerName, __GENUS, __CLASS, __SUPERCLASS, __DYNASTY, __RELPATH, __PROPERTY_COUNT, __DERIVATION, __SERVER, __NAMESPACE, __PATH, PSComputerName, Scope, Path, Options, ClassPath, Properties, SystemProperties, Qualifiers, Site, Container
     $startType = $startType -replace "StartMode", ""
     $startType = $startType -replace "@{=", ""
@@ -96,51 +73,41 @@ function getServiceStartupType($serviceName) {
     }
     return "Automatic"
 }
-
-#gets the status of a service (running or stopped)
 function getServiceStatus($serviceName) {
     $global:sourceServices += "$serviceName"
     "$serviceName"
    return (Get-Service -Name $serviceName).Status 
 }
-
-#returns 1 if an input required to execute the program is missing. It is used to stop the execution
 function hasInputs {
-    if($global:siteName -ne "" -and $global:sourceInstanceName -ne "" -and $global:newInstanceName -ne "" -and $global:newSQLDBName -ne ""  ) {
+    if($global:siteName -ne "" -and $global:instanceName -ne "" -and $global:newInstanceName -ne "" -and $global:newSQLDBName -ne "" ) {
          return 0
     }
     return 1    
 }
-
-#gets all the user inputs if they are not already hardcoded, if the new SQL database name is not entered, it will be the same as the new instance name
 function getInputs { 
     if($global:siteName -eq "") {
         $global:siteName = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the name of the site where the VKPI instance is", "Site Name Request")
     }
-    if($global:sourceInstanceName -eq "") {   
-         $global:sourceInstanceName =  [Microsoft.VisualBasic.Interaction]::InputBox("Enter the source VKPI instance name", "Instance Name Request")
+    if($global:instanceName -eq "") {   
+         $global:instanceName =  [Microsoft.VisualBasic.Interaction]::InputBox("Enter the source VKPI instance name", "Instance Name Request")
     }
     if($global:newInstanceName -eq "") {
-        $global:newInstanceName = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the new instance name", "Instance Name Request")
+        $global:newInstanceName = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the new VKPI instance name", "Instance Name Request")
     }
+    $global:newSQLDBName = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the new SQL DB name (If left blank it will use the VKPI instance name)", "SQL DB Name Request")
     if($global:newSQLDBName -eq "") {
-        $global:newSQLDBName = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the new SQL DB name (leave blank for same as VKPI instance name) ", "SQL DB Name Request")
-        if($global:newSQLDBName -eq "") {
-            $global:newSQLDBName =  $global:newInstanceName 
-        }
+        $global:newSQLDBName =  $global:newInstanceName 
     }
-
 }
-
 function createBaseServices {
-    $newCacheServiceName="Visual KPI Cache Server ($global:newInstanceName)"
-    $newAlertServiceName="Visual KPI Alert Server ($global:newInstanceName)"
-    $oldCacheName  ="Visual KPI Cache Server ($global:sourceInstanceName)"
-    $oldAlertName = "Visual KPI Alert Server ($global:sourceInstanceName)"
-    $cacheStartType = getServiceStartupType($oldCacheName)
-    $alertStartType = getServiceStartupType($oldAlertName)
-    New-Service -Name "$newCacheServiceName" -BinaryPathName "$global:pathToNewInstance\Cache Server\VisualKPICache.exe" -DisplayName "$newCacheServiceName" -StartupType $cacheStartType -Description "Enables caching of KPI data in Visual KPI Server" -Credential $global:NetworkServiceCredentials
-    New-Service -Name "$newAlertServiceName" -BinaryPathName "$global:pathToNewInstance\Alerter\VisualKPIAlerter.exe" -DisplayName "$newAlertServiceName" -StartupType $alertStartType -Description "Enables sending of Alerts based on KPI state changes in Visual KPI Server" -Credential $global:NetworkServiceCredentials
+    $global:newCacheServiceName="Visual KPI Cache Server ($global:newInstanceName)"
+    $global:newAlertServiceName="Visual KPI Alert Server ($global:newInstanceName)"
+    $oldCacheName  ="Visual KPI Cache Server ($global:instanceName)"
+    $oldAlertName = "Visual KPI Alert Server ($global:instanceName)"
+    $cacheStartType = getStartupType($oldCacheName)
+    $alertStartType = getStartupType($oldAlertName)
+    New-Service -Name "$global:newCacheServiceName" -BinaryPathName "$global:pathToNewInstance\Cache Server\VisualKPICache.exe" -DisplayName "$global:newCacheServiceName" -StartupType $cacheStartType -Description "Enables caching of KPI data in Visual KPI Server" -Credential $global:NetworkServiceCredentials
+    New-Service -Name "$global:newAlertServiceName" -BinaryPathName "$global:pathToNewInstance\Alerter\VisualKPIAlerter.exe" -DisplayName "$global:newAlertServiceName" -StartupType $alertStartType -Description "Enables sending of Alerts based on KPI state changes in Visual KPI Server" -Credential $global:NetworkServiceCredentials
     $cacheStatus=getServiceStatus($oldCacheName)
     $alertStatus=getServiceStatus($oldAlertName)
     if($cacheStatus -eq "Running") {
@@ -150,42 +117,25 @@ function createBaseServices {
         Start-Service -Name $newAlertServiceName
     } 
 }
-
-#makes a backup of the source database and restores it for the new instance
 function cloneDatabase {
-    $log="_log"
-    Backup-SqlDatabase -ServerInstance "$global:SQLServer" -Database "$global:sourceSQLDBName" -Initialize
-    [System.Reflection.Assembly]::LoadWithPartialName('Microsoft.SqlServer.SMO') | out-null
-    $s = New-Object ('Microsoft.SqlServer.Management.Smo.Server') "$global:SQLServer" 
-    $backupDirectoryPath= $s.Settings.BackupDirectory
-    $MDFDirectory = $s.Settings.DefaultFile
-    $LDFDirectory = $s.Settings.DefaultLog
-
-    $DBBackupPath = "$backupDirectoryPath\$sourceSQLDBName.bak"
-    $dataFileLocation ="$MDFDirectory\$global:newSQLDBName.mdf"
-    $logFileLocation = "$LDFDirectory\$global:newSQLDBName$log.ldf"
-    $sql = @"
-    select user_name(),suser_sname()
-    GO  
-    USE [master]
-    RESTORE DATABASE [$global:newSQLDBName] 
-    FROM DISK = N'$DBBackupPath' 
-    WITH FILE = 1,  
-        MOVE N'$global:sourceSQLDBName' TO N'$dataFileLocation',  
-        MOVE N'$global:sourceSQLDBName$log' TO N'$logFileLocation',  
-        NOUNLOAD, REPLACE, STATS = 5
-    GO
-    ALTER DATABASE [$global:newSQLDBName] MODIFY FILE ( NAME = '$global:sourceSQLDBName', NEWNAME = '$global:newSQLDBName');
-    ALTER DATABASE [$global:newSQLDBName] MODIFY FILE ( NAME = '$global:sourceSQLDBName$log', NEWNAME = '$global:newSQLDBName$log');
-    ALTER DATABASE [$global:newSQLDBName] SET MULTI_USER 
-"@
-
-    invoke-sqlcmd $sql -ServerInstance $global:SQLServer 
+    $SQLInstanceName = "$global:SQLServer"
+    $SourceDBName   = "$global:SQLDBName"
+    $CopyDBName = "$global:newSQLDBName"
+    $Server  = New-Object -TypeName 'Microsoft.SqlServer.Management.Smo.Server' -ArgumentList $SQLInstanceName
+    $SourceDB = $Server.Databases[$SourceDBName]
+    $CopyDB = New-Object -TypeName 'Microsoft.SqlServer.Management.SMO.Database' -ArgumentList $Server , $CopyDBName
+    $CopyDB.Create() 
+    $ObjTransfer   = New-Object -TypeName Microsoft.SqlServer.Management.SMO.Transfer -ArgumentList $SourceDB
+    $ObjTransfer.CopyAllTables = $true
+    $ObjTransfer.Options.WithDependencies = $true
+    $ObjTransfer.Options.ContinueScriptingOnError = $true
+    $ObjTransfer.DestinationDatabase = $CopyDBName
+    $ObjTransfer.DestinationServer = $Server.Name
+    $ObjTransfer.DestinationLoginSecure = $true
+    $ObjTransfer.CopySchema = $true
+    $ObjTransfer.ScriptTransfer()
+    $ObjTransfer.TransferData()
 }
-
-
-
-
 function createRemoteContextServices {
     if(!$global:remoteContextExists){
         "No RCS"
@@ -224,8 +174,8 @@ function createRemoteContextServices {
                     $remoteContextServiceDescription ="Enables automatic creation of Visual KPI Components from AF Elements"
                 } 
                 $remoteContextServiceBinaryPath= "$global:pathToNewInstance\Remote Context Services\$folder\$child"
-                $oldServiceName = $remoteContextServiceName -replace "$global:newInstanceName", "$global:sourceInstanceName"   
-                $startType = getServiceStartupType($oldServiceName)
+                $oldServiceName = $remoteContextServiceName -replace "$global:newInstanceName", "$global:instanceName"   
+                $startType = getStartupType($oldServiceName)
                 $oldServiceStatus = getServiceStatus($oldServiceName)
                 New-Service -Name "$remoteContextServiceName" -BinaryPathName "$remoteContextServiceBinaryPath" -DisplayName "$remoteContextServiceName" -StartupType $startType -Description "$remoteContextServiceDescription" -Credential $global:NetworkServiceCredentials
                 if($oldServiceStatus -eq "Running") {
@@ -237,76 +187,65 @@ function createRemoteContextServices {
         }
     }
 }
-
-
 function cloneAppPoolsAndFiles {
     $ws="_WS"
-    copy "IIS:\AppPools\TAP_$global:sourceInstanceName" "IIS:\AppPools\TAP_$global:newInstanceName"#copies the main app pool (TAP_INSTANCEName)
+    copy "IIS:\AppPools\TAP_$global:instanceName" "IIS:\AppPools\TAP_$global:newInstanceName"
+    copy "IIS:\AppPools\TAP_$global:instanceName$ws" "iis:\apppools\TAP_$global:newInstanceName$ws"
+    $physicalPathToNewInstance = $global:pathToInstance -replace "$global:instanceName", "$global:newInstanceName"
+    $correctSitePath = $global:pathToInstance -replace "$global:instanceName", ""
+    Set-ItemProperty "IIS:\Sites\$global:siteName\"  physicalPath "$correctSitePath"
 
-    copy "IIS:\AppPools\TAP_$global:sourceInstanceName$ws" "iis:\apppools\TAP_$global:newInstanceName$ws"#Copies the Web service app pool
 
-    $physicalPathToNewInstance = $global:pathToInstance -replace "$global:sourceInstanceName", "$global:newInstanceName"
+    copy $global:pathToInstance -Destination $physicalPathToNewInstance -Recurse -Force
 
-    $correctSitePath = $global:pathToInstance -replace "$global:sourceInstanceName", ""
-    Set-ItemProperty "IIS:\Sites\$global:siteName\"  physicalPath "$correctSitePath" 
-
-    copy $global:pathToInstance -Destination $physicalPathToNewInstance -Recurse -Force #copies the files 
-
-    ConvertTo-WebApplication "IIS:\Sites\$global:siteName\$global:newInstanceName" -ApplicationPool "TAP_$global:newInstanceName" #converts the instance folder into a web app and assigns an app pool
-
-    ConvertTo-WebApplication "IIS:\Sites\$global:siteName\$global:newInstanceName\Interfaces" -ApplicationPool "TAP_$global:newInstanceName"#converts the interfaces folder into a web app and assigns an app pool
+    ConvertTo-WebApplication "IIS:\Sites\$global:siteName\$global:newInstanceName" -ApplicationPool "TAP_$global:newInstanceName"
+    "appool set"
+    ConvertTo-WebApplication "IIS:\Sites\$global:siteName\$global:newInstanceName\Interfaces" -ApplicationPool "TAP_$global:newInstanceName"
   
-    ConvertTo-WebApplication "IIS:\Sites\$global:siteName\$global:newInstanceName\Webservice" -ApplicationPool "TAP_$global:newInstanceName$ws"#converts the webservice folder into a web app and assigns an app pool
-    $interfaces = Get-ChildItem "iis:\Sites\$global:siteName\$global:sourceInstanceName\Interfaces" #gets all the interfaces
-    foreach($interface in $interfaces) {#copies all interfaces app pools and converts the folders into web applications
+    ConvertTo-WebApplication "IIS:\Sites\$global:siteName\$global:newInstanceName\Webservice" -ApplicationPool "TAP_$global:newInstanceName$ws"
+    $interfaces = Get-ChildItem "iis:\Sites\$global:siteName\$global:instanceName\Interfaces"
+    foreach($interface in $interfaces) {
         $interfaceName = Get-ItemProperty -path "$interface"  | Select-Object Name
         $interfaceName = $interfaceName -replace "@{Name=", ""
         $interfaceName = $interfaceName -replace "}", ""
-        $appPoolName = Get-ItemProperty -path "iis:\Sites\$siteName\$global:sourceInstanceName\Interfaces\$interfaceName" | Select-Object applicationPool 
+        $appPoolName = Get-ItemProperty -path "iis:\Sites\$siteName\$instanceName\Interfaces\$interfaceName" | Select-Object applicationPool 
         $appPoolName = $AppPoolName -replace "@{applicationPool=", ""
         $appPoolName = $AppPoolName -replace "}", ""
-        $newAppPoolName = $appPoolName -replace "$global:sourceInstanceName","$global:newInstanceName"
+        $newAppPoolName = $appPoolName -replace "$global:instanceName","$global:newInstanceName"
         copy "IIS:\AppPools\$appPoolName" "IIS:\AppPools\$newAppPoolName" 
         ConvertTo-WebApplication "IIS:\Sites\$global:siteName\$global:newInstanceName\Interfaces\$interfaceName" -ApplicationPool $newAppPoolName 
     }
 }
-
-#stops the app pools of the source instance
 function stopAppPools {
     $appPools = Get-ChildItem "iis:\AppPools"
     foreach($appPool in $appPools) {
         $appPoolName = $appPool | Select-Object Name
         $appPoolName = $AppPoolName -replace "@{name=", ""
         $appPoolName = $AppPoolName -replace "}", ""  
-        if($appPoolName.contains("$global:sourceInstanceName"+"_") -or $appPoolName -eq "TAP_$global:sourceInstanceName") {#stops the app pool that contain the source instance name in their name
+        if($appPoolName.contains("$global:instanceName"+"_") -or $appPoolName -eq "TAP_$global:instanceName") {#stops the app pool that contain the source instance name in their name
             echo $appPoolName
             $global:sourceAppPools += "$appPoolName"
             Stop-WebAppPool $appPoolName
         }
     }
 }
-
-#starts the app pools for the source and new instance
 function startAppPools {
     $appPools = Get-ChildItem "iis:\AppPools"
     foreach($appPool in $appPools) {
         $appPoolName = $appPool | Select-Object Name
         $appPoolName = $AppPoolName -replace "@{name=", ""
         $appPoolName = $AppPoolName -replace "}", ""  
-        if($appPoolName.contains("$global:sourceInstanceName") -or $appPoolName.contains("$global:newInstanceName")) {#starts the app pools that contain the source and new instance name in their name
-            echo $appPoolName
-            Start-WebAppPool $appPoolName
-        }
+        echo $appPoolName
+        Start-WebAppPool $appPoolName
     }
 }
 
-#replaces the connection strings of the cloned files (for the instance, rcs, cache server and alerter)
 function replaceConnectionStrings {
-    (Get-Content -Path "$global:pathtoNewInstance\web.config") | ForEach-Object {$_ -replace ";DataBase=$global:sourceSQLDBName;",";DataBase=$global:newSQLDBName;"} | Set-Content -Path "$global:pathtoNewInstance\web.config"
-    (Get-Content -Path "$global:pathtoNewInstance\Cache Server\VisualKPICache.xml") | ForEach-Object {$_ -replace ";DataBase=$global:sourceSQLDBName;",";DataBase=$global:newSQLDBName;"} | Set-Content -Path "$global:pathtoNewInstance\Cache Server\VisualKPICache.xml"
-    (Get-Content -Path "$global:pathtoNewInstance\Alerter\VisualKPIAlerter.xml") | ForEach-Object {$_ -replace ";DataBase=$global:sourceSQLDBName;",";DataBase=$global:newSQLDBName;"} | Set-Content -Path "$global:pathtoNewInstance\Alerter\VisualKPIAlerter.xml"
+    (Get-Content -Path "$global:pathtoNewInstance\web.config") | ForEach-Object {$_ -replace ";DataBase=$global:SQLDBName;",";DataBase=$global:newSQLDBName;"} | Set-Content -Path "$global:pathtoNewInstance\web.config"
+    (Get-Content -Path "$global:pathtoNewInstance\Cache Server\VisualKPICache.xml") | ForEach-Object {$_ -replace ";DataBase=$global:SQLDBName;",";DataBase=$global:newSQLDBName;"} | Set-Content -Path "$global:pathtoNewInstance\Cache Server\VisualKPICache.xml"
+    (Get-Content -Path "$global:pathtoNewInstance\Alerter\VisualKPIAlerter.xml") | ForEach-Object {$_ -replace ";DataBase=$global:SQLDBName;",";DataBase=$global:newSQLDBName;"} | Set-Content -Path "$global:pathtoNewInstance\Alerter\VisualKPIAlerter.xml"
     
-    if(!$global:remoteContextExists){ #if the remote context folder doesnt exist then we stop here
+    if(!$global:remoteContextExists){
         "No RCS"
         return
     }
@@ -319,13 +258,12 @@ function replaceConnectionStrings {
             $childName = $childName -replace "@{Name=", ""
             $childName = $childName -replace "}", ""
             if($childName.endswith("Service.xml") ) {
-             (Get-Content -Path "$global:pathtoNewInstance\Remote Context Services\$folder\$child") | ForEach-Object {$_ -replace ";DataBase=$global:sourceSQLDBName;",";DataBase=$global:newSQLDBName;"} | Set-Content -Path "$global:pathtoNewInstance\Remote Context Services\$folder\$child"
+             (Get-Content -Path "$global:pathtoNewInstance\Remote Context Services\$folder\$child") | ForEach-Object {$_ -replace ";DataBase=$global:SQLDBName;",";DataBase=$global:newSQLDBName;"} | Set-Content -Path "$global:pathtoNewInstance\Remote Context Services\$folder\$child"
             }
          }
     }
 }
 
-#updates interfaces.dbo table to point to the new instance 
 function editDatabaseInterfacesURL { 
     $SqlConnection = New-Object System.Data.SqlClient.SqlConnection
     $SqlConnection.ConnectionString = "Server = $global:SQLServer; Database = 
@@ -334,7 +272,7 @@ function editDatabaseInterfacesURL {
     $update = @"
      UPDATE $global:SQLTable
      SET 
-     [URL] = REPLACE([URL], '$global:sourceInstanceName/interfaces/', '$global:newInstanceName/interfaces/') 
+     [URL] = REPLACE([URL], '$global:instanceName/interfaces/', '$global:newInstanceName/interfaces/') 
 "@
     $dbwrite = $SqlConnection.CreateCommand()
     $dbwrite.CommandText = $update
@@ -342,8 +280,6 @@ function editDatabaseInterfacesURL {
     $Sqlconnection.Close()
     "Edited Interface SQL Table"
 }
-
-#searches for the SQL server and the database inside the web.config file
 function getServerAndDB {
   $lines = Get-Content -path "$global:pathToInstance\web.config"
   $serverPattern = "Server=(.*);DataBase"
@@ -359,12 +295,10 @@ function getServerAndDB {
       $db = $db.value
       $db = $db -replace "DataBase=", ""
       $db = $db -replace ";Integrated", ""
-      $global:sourceSQLDBName= $db
+      $global:SQLDBName= $db
     }
   }
 }
-
-#adds the login to the database so that it can be accessed 
 function mapDatabaseRoleToLogin {
     #get variables
     $instanceName = "$global:SQLServer"
@@ -395,18 +329,13 @@ function mapDatabaseRoleToLogin {
 }
 try {
 
-getInputs #
+getInputs
 if(hasInputs -eq 1){return}
-
-$global:pathToInstance = Get-WebFilePath "iis:\Sites\$global:siteName\$global:sourceInstanceName"
-
-"--------------------------------------Getting server and database--------------------------------------"
+#cloneIISApp #clones the file system stuff
+$global:pathToInstance = Get-WebFilePath "iis:\Sites\$global:siteName\$global:instanceName"
 getServerAndDB
-
-"--------------------------------------Stoping app pools--------------------------------------"
 stopAppPools
 
-#waits until the app pools are stopped
 $cango = ""
 do
 {
@@ -418,7 +347,7 @@ do
         $appPoolName = $appPool | Select-Object Name
         $appPoolName = $AppPoolName -replace "@{name=", ""
         $appPoolName = $AppPoolName -replace "}", ""  
-        if($appPoolName.contains("$global:sourceInstanceName")) {
+        if($appPoolName.contains("$global:instanceName")) {
             if((Get-WebAppPoolState -Name $appPoolName).Value -eq "Running") {
                 $cango = ""
             }
@@ -426,11 +355,7 @@ do
     }
 }
 until ($cango -eq "go")
-"--------------------------------------App Pools stopped--------------------------------------"
-
-
-
-"--------------------------------------Cloning file system--------------------------------------"
+"App Pool  stopped"
 Start-Sleep -Seconds 2
 cloneAppPoolsAndFiles
 
@@ -438,24 +363,19 @@ $global:pathToNewInstance = Get-WebFilePath "iis:\Sites\$global:siteName\$global
 $global:remoteContextPath = "$global:pathToInstance\Remote Context Services" 
 $global:remoteContextExists = Test-Path -LiteralPath $remoteContextPath
 
-"--------------------------------------Creating remote cs--------------------------------------"
+
 createRemoteContextServices
-"--------------------------------------Creating base services--------------------------------------"
 createBaseServices
-"--------------------------------------Replacing connection strings--------------------------------------"
 replaceConnectionStrings
-"--------------------------------------Cloning database--------------------------------------"
+#startAppPools
+"We will now clone the database, this might take a while... please standby"
 cloneDatabase
-"--------------------------------------Editing interfaces.dbo--------------------------------------"
 editDatabaseInterfacesURL
-"Creating database login"
 mapDatabaseRoleToLogin
-
-"--------------------------------------The script has finished succesfully--------------------------------------"
-
 } catch {"This is embarrasing, an error has ocurred"
     exit
 }
+
 $msgBoxInput =  [System.Windows.MessageBox]::Show('We have created the new instance, would you like to delete the source instance?','Delete source instance?','YesNo','Error')
 
   switch  ($msgBoxInput) {
@@ -463,7 +383,7 @@ $msgBoxInput =  [System.Windows.MessageBox]::Show('We have created the new insta
   'Yes' {
 
 "--------------------------------------cleaning up--------------------------------------"
-        Remove-webApplication -site $global:siteName -Name $global:sourceInstanceName
+        Remove-webApplication -site $global:siteName -Name $global:instanceName
         foreach($appPool in $global:sourceAppPools) {
             "$appPool"
             remove-webapppool -name $appPool
@@ -480,15 +400,15 @@ $msgBoxInput =  [System.Windows.MessageBox]::Show('We have created the new insta
             $dropQuery = @"
             USE [master]
             GO
-            ALTER DATABASE [$global:sourceSQLDBName] SET SINGLE_USER WITH ROLLBACK IMMEDIATE
+            ALTER DATABASE [$global:SQLDBName] SET SINGLE_USER WITH ROLLBACK IMMEDIATE
             GO
-            DROP DATABASE [$global:sourceSQLDBName]
+            DROP DATABASE [$global:SQLDBName]
             GO
 "@
 
             invoke-sqlcmd -ServerInstance "$global:SQLServer" -Query "$dropQuery"
         }Catch{
-         Write-Output 'Failed to delete database'
+             Write-Output 'Failed to delete database'
         }
         "--------------------------------------Starting app pools--------------------------------------"
 startAppPools

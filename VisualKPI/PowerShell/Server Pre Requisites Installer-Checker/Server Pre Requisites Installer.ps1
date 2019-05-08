@@ -63,7 +63,8 @@ function checkPreRequisites {
 
 
 try {
-$action = [Microsoft.VisualBasic.Interaction]::InputBox("Enter install for installing or check for checking the installations", "Action Request")
+#$action = [Microsoft.VisualBasic.Interaction]::InputBox("Enter install for installing or check for checking the installations", "Action Request")
+$action = "install"
 if($action -eq "check") {
     ""
     "-------CHECKING PREREQUISITES---------"

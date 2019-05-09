@@ -183,48 +183,52 @@ function getAppPoolValue($appPoolName) {
 }
 
 function packDB {
-    $log="_log"
-    Backup-SqlDatabase -ServerInstance "$global:SQLServer" -Database "$global:sourceSQLDBName" -Initialize
-    [System.Reflection.Assembly]::LoadWithPartialName('Microsoft.SqlServer.SMO') | out-null
-    $s = New-Object ('Microsoft.SqlServer.Management.Smo.Server') "$global:SQLServer" 
-    $backupDirectoryPath= $s.Settings.BackupDirectory
-    $DBBackupPath = "$backupDirectoryPath\$sourceSQLDBName.bak"
-    copy "$DBBackupPath" "$targetFolder"
+    if($global:SQLServer.Contains("localhost") -or $global:SQLServer.Equals(".")) {      
+        $log="_log"
+        Backup-SqlDatabase -ServerInstance "$global:SQLServer" -Database "$global:sourceSQLDBName" -Initialize
+        [System.Reflection.Assembly]::LoadWithPartialName('Microsoft.SqlServer.SMO') | out-null
+        $s = New-Object ('Microsoft.SqlServer.Management.Smo.Server') "$global:SQLServer" 
+        $backupDirectoryPath= $s.Settings.BackupDirectory
+        $DBBackupPath = "$backupDirectoryPath\$sourceSQLDBName.bak"
+        copy "$DBBackupPath" "$targetFolder"
 
-    $at = '"@'
-    $db_path = '$DBBackupPath'
-    $sc_sql_name = '$global:sourceSQLDBName'
-    $trg_sql_name = '$global:targetSQLDBName'
-    $dt_fl_location = '$dataFileLocation'
-    $lg_fl_location = '$logFileLocation' 
-    $log='$log'
-    appendTextToRestoreScript('$global:log="_log"')
-    appendTextToRestoreScript('[System.Reflection.Assembly]::LoadWithPartialName("Microsoft.SqlServer.SMO") | out-null')
-    appendTextToRestoreScript('$global:s = New-Object ("Microsoft.SqlServer.Management.Smo.Server") "$global:targetSQLServer"') 
-    appendTextToRestoreScript('$global:MDFDirectory = $s.Settings.DefaultFile')
-    appendTextToRestoreScript('$global:LDFDirectory = $s.Settings.DefaultLog')
+        $at = '"@'
+        $db_path = '$DBBackupPath'
+        $sc_sql_name = '$global:sourceSQLDBName'
+        $trg_sql_name = '$global:targetSQLDBName'
+        $dt_fl_location = '$dataFileLocation'
+        $lg_fl_location = '$logFileLocation' 
+        $log='$log'
+        appendTextToRestoreScript('$global:log="_log"')
+        appendTextToRestoreScript('[System.Reflection.Assembly]::LoadWithPartialName("Microsoft.SqlServer.SMO") | out-null')
+        appendTextToRestoreScript('$global:s = New-Object ("Microsoft.SqlServer.Management.Smo.Server") "$global:targetSQLServer"') 
+        appendTextToRestoreScript('$global:MDFDirectory = $s.Settings.DefaultFile')
+        appendTextToRestoreScript('$global:LDFDirectory = $s.Settings.DefaultLog')
 
-    appendTextToRestoreScript('$global:DBBackupPath = "$PSScriptRoot\$sourceSQLDBName.bak"')
-    appendTextToRestoreScript('$global:dataFileLocation ="$MDFDirectory\$global:targetSQLDBName.mdf"')
-    appendTextToRestoreScript('$global:logFileLocation = "$LDFDirectory\$global:targetSQLDBName$log.ldf"')
-    appendTextToRestoreScript('$sql = @"')
-    appendTextToRestoreScript('select user_name(),suser_sname()')
-    appendTextToRestoreScript('GO')  
-    appendTextToRestoreScript('USE [master]')
-    appendTextToRestoreScript('RESTORE DATABASE [$global:targetSQLDBName]') 
-    appendTextToRestoreScript("FROM DISK = N'$db_path'") 
-    appendTextToRestoreScript('WITH FILE = 1,')  
-    appendTextToRestoreScript("    MOVE N'$sc_sql_name' TO N'$dt_fl_location',")  
-    appendTextToRestoreScript("    MOVE N'$sc_sql_name$log' TO N'$lg_fl_location',")  
-    appendTextToRestoreScript('    NOUNLOAD, REPLACE, STATS = 5')
-    appendTextToRestoreScript('GO')
-    appendTextToRestoreScript("ALTER DATABASE [$trg_sql_name] MODIFY FILE ( NAME = '$sc_sql_name', NEWNAME = '$trg_sql_name');")
-    appendTextToRestoreScript("ALTER DATABASE [$trg_sql_name] MODIFY FILE ( NAME = '$sc_sql_name$log', NEWNAME = '$trg_sql_name$log');")
-    appendTextToRestoreScript("ALTER DATABASE [$trg_sql_name] SET MULTI_USER") 
-    appendTextToRestoreScript($at)
+        appendTextToRestoreScript('$global:DBBackupPath = "$PSScriptRoot\$sourceSQLDBName.bak"')
+        appendTextToRestoreScript('$global:dataFileLocation ="$MDFDirectory\$global:targetSQLDBName.mdf"')
+        appendTextToRestoreScript('$global:logFileLocation = "$LDFDirectory\$global:targetSQLDBName$log.ldf"')
+        appendTextToRestoreScript('$sql = @"')
+        appendTextToRestoreScript('select user_name(),suser_sname()')
+        appendTextToRestoreScript('GO')  
+        appendTextToRestoreScript('USE [master]')
+        appendTextToRestoreScript('RESTORE DATABASE [$global:targetSQLDBName]') 
+        appendTextToRestoreScript("FROM DISK = N'$db_path'") 
+        appendTextToRestoreScript('WITH FILE = 1,')  
+        appendTextToRestoreScript("    MOVE N'$sc_sql_name' TO N'$dt_fl_location',")  
+        appendTextToRestoreScript("    MOVE N'$sc_sql_name$log' TO N'$lg_fl_location',")  
+        appendTextToRestoreScript('    NOUNLOAD, REPLACE, STATS = 5')
+        appendTextToRestoreScript('GO')
+        appendTextToRestoreScript("ALTER DATABASE [$trg_sql_name] MODIFY FILE ( NAME = '$sc_sql_name', NEWNAME = '$trg_sql_name');")
+        appendTextToRestoreScript("ALTER DATABASE [$trg_sql_name] MODIFY FILE ( NAME = '$sc_sql_name$log', NEWNAME = '$trg_sql_name$log');")
+        appendTextToRestoreScript("ALTER DATABASE [$trg_sql_name] SET MULTI_USER") 
+        appendTextToRestoreScript($at)
 
-    appendTextToRestoreScript('invoke-sqlcmd $sql -ServerInstance $global:targetSQLServer  ')
-   
+        appendTextToRestoreScript('invoke-sqlcmd $sql -ServerInstance $global:targetSQLServer  ')
+    
+    } else {
+        $global:packDBMessage = "The SQL server is not on this machine, please Backup the DB Manually and restore it manually"
+    }
 }
 
 function packSystemFilesAndSite {
@@ -574,3 +578,4 @@ editDatabaseInterfacesURL
 mapDatabaseRoleToLogin
 replaceConnectionStrings
 startAppPools
+"$global:packDBMessage"
